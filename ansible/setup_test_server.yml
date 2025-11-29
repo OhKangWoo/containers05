@@ -1,0 +1,95 @@
+---
+- name: Configure Test Server for PHP Application
+  hosts: test_servers
+  become: yes
+  vars:
+    php_version: "8.1"
+    app_directory: "/var/www/html/php-app"
+    document_root: "{{ app_directory }}/public"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Apache2
+      apt:
+        name: apache2
+        state: present
+
+    - name: Start and enable Apache2 service
+      systemd:
+        name: apache2
+        state: started
+        enabled: yes
+
+    - name: Install PHP and required extensions
+      apt:
+        name:
+          - "php{{ php_version }}"
+          - "php{{ php_version }}-cli"
+          - "php{{ php_version }}-common"
+          - "php{{ php_version }}-mysql"
+          - "php{{ php_version }}-xml"
+          - "php{{ php_version }}-curl"
+          - "php{{ php_version }}-mbstring"
+          - "php{{ php_version }}-zip"
+          - libapache2-mod-php
+        state: present
+
+    - name: Enable Apache rewrite module
+      apache2_module:
+        name: rewrite
+        state: present
+      notify: Restart Apache
+
+    - name: Create application directory
+      file:
+        path: "{{ app_directory }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Create public directory
+      file:
+        path: "{{ document_root }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Configure Apache virtual host
+      template:
+        src: templates/vhost.conf.j2
+        dest: /etc/apache2/sites-available/php-app.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Apache
+
+    - name: Disable default Apache site
+      command: a2dissite 000-default.conf
+      args:
+        removes: /etc/apache2/sites-enabled/000-default.conf
+      notify: Restart Apache
+
+    - name: Enable PHP application site
+      command: a2ensite php-app.conf
+      args:
+        creates: /etc/apache2/sites-enabled/php-app.conf
+      notify: Restart Apache
+
+    - name: Set proper permissions on web directory
+      file:
+        path: /var/www/html
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+  handlers:
+    - name: Restart Apache
+      systemd:
+        name: apache2
+        state: restarted
